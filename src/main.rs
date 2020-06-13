@@ -1,16 +1,34 @@
 use std::process::{Command, Stdio};
-use std::env;
+use std::{env, fmt};
 use std::path::PathBuf;
 use std::io::{Write, BufRead, BufReader};
 use std::fs::File;
 use termion::{color, style};
+use std::fmt::Formatter;
+use std::error::Error;
 
-fn main() -> Result<(), std::io::Error> {
+struct FlasherError(String);
+
+impl fmt::Display for FlasherError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}{}", color::Fg(color::Red), self.0, style::Reset)
+    }
+}
+
+impl fmt::Debug for FlasherError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+impl Error for FlasherError {}
+
+fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        println!("{}\nPlease provide the path to an elf file.", color::Fg(color::Red));
-        return Ok(())
+    if args.len() <= 1 {
+        eprintln!("{}usage: jlink_flasher path_to.bin [jlink serial]{}", color::Fg(color::Blue), style::Reset);
+        return Err(Box::new(FlasherError("wrong arguments".into())));
     }
 
     let current_dir = env::current_dir()?;
@@ -35,8 +53,8 @@ fn main() -> Result<(), std::io::Error> {
     let config = match File::open(config_path) {
         Ok(c) => c,
         Err(e) => {
-            println!("{}{}\nConfig file missing?", color::Fg(color::Red), e);
-            return Ok(())
+            println!("{}{}", color::Fg(color::Yellow), e);
+            return Err(Box::new(FlasherError("Config file missing?".into())));
         }
     };
     let config_lines = BufReader::new(config).lines();
@@ -51,24 +69,32 @@ fn main() -> Result<(), std::io::Error> {
     match objcopy.status() {
         Ok(s) => {
             if !s.success() {
-                println!("{}objcopy returned non-zero, internal error", color::Fg(color::Red));
-                return Ok(())
+                return Err(Box::new(FlasherError("objcopy returned non-zero, internal error".into())));
             }
         },
         Err(e) => {
-            println!("{}Error: {}\nMaybe arm-none-eabi-objcopy is not installed or not in path?", color::Fg(color::Red), e);
-            return Ok(())
+            println!("{}{}\n", color::Fg(color::Yellow), e);
+            return Err(Box::new(FlasherError("Maybe arm-none-eabi-objcopy is not installed or not in path?".into())));
         }
     };
     println!("{}Created: {}.bin{}", color::Fg(color::Green), elf_name, style::Reset);
 
     let mut jlinkexe = Command::new("JLinkExe");
+    // if args.len() == 3 {
+    //     let serial = &args[2];
+    //     println!("Serial provided: {}", serial);
+    //     jlinkexe.arg("USB");
+    //     jlinkexe.arg(serial);
+    // }
+    for i in 2..args.len() {
+        jlinkexe.arg(&args[i]);
+    }
     jlinkexe.stdin(Stdio::piped());
     let mut jlinkexe = match jlinkexe.spawn() {
         Ok(j) => j,
         Err(e) => {
-            println!("{}Error: {}\nJLinkExe is not installed or not in path?", color::Fg(color::Red), e);
-            return Ok(())
+            println!("{}{}", color::Fg(color::Red), e);
+            return Err(Box::new(FlasherError("JLinkExe is not installed or not in path?".into())));
         }
     };
 
