@@ -1,11 +1,13 @@
 use std::process::{Command, Stdio};
 use std::{env, fmt};
-use std::path::PathBuf;
+use std::path::{PathBuf};
 use std::io::{Write, BufRead, BufReader};
 use std::fs::File;
 use termion::{color, style};
 use std::fmt::Formatter;
 use std::error::Error;
+
+const CONFIG_FILENAME: &'static str = "flasher.conf";
 
 struct FlasherError(String);
 
@@ -23,6 +25,18 @@ impl fmt::Debug for FlasherError {
 
 impl Error for FlasherError {}
 
+// fn open_one_of<P: AsRef<Path>>(paths: Vec<P>) -> std::io::Result<File> {
+//     let mut last_err = None;
+//     for p in paths {
+//         println!("Trying: {}", p.as_ref().display());
+//         match File::open(p) {
+//             Ok(f) => { return Ok(f); }
+//             Err(e) => { last_err = Some(e); }
+//         }
+//     }
+//     return Err(last_err.unwrap());
+// }
+
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
 
@@ -31,25 +45,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err(Box::new(FlasherError("wrong arguments".into())));
     }
 
-    let current_dir = env::current_dir()?;
     let elf_path = &args[1];
     let mut target_dir = PathBuf::new();
-    target_dir.push(&current_dir);
     target_dir.push(&elf_path);
     let elf_name = String::from(target_dir.file_name().unwrap().to_str().unwrap());
     target_dir.pop();
 
-    let mut config_path = target_dir.clone();
-    let pop_count: u8 =
-    if config_path.ends_with("examples") {
-        4
-    } else {
-        3
-    };
-    for _ in 0..pop_count {
-        config_path.pop();
-    }
-    config_path.push("flasher.conf");
+    let mut config_path = PathBuf::new();
+    config_path.push(env::current_dir().unwrap());
+    config_path.push(CONFIG_FILENAME);
     let config = match File::open(config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -57,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             return Err(Box::new(FlasherError("Config file missing?".into())));
         }
     };
-    let config_lines = BufReader::new(config).lines();
+    let config = BufReader::new(config).lines();
 
     let mut objcopy = Command::new("arm-none-eabi-objcopy");
     objcopy.current_dir(&target_dir);
@@ -100,7 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     {
         let stdin = jlinkexe.stdin.as_mut().unwrap();
-        for l in config_lines {
+        for l in config {
             if let Ok(l) = l {
                 if l.contains("{bin_path}") {
                     let mut bin_path = target_dir.clone();
